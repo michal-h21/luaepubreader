@@ -15,26 +15,57 @@ function M.load(filename)
   return t
 end
 
+function EpubReader:check_mimetype()
+  local mimetype, msg = self:read_file("mimetype") 
+  if not mimetype then return nil, "Cannot detect mimetype" end
+  if mimetype ~= "application/epub+zip" then return nil, "Wrong mimetype: " .. mimetype end
+  return true
+end
+
+function EpubReader:load_container()
+  local container = self:read_xml_file("META-INF/container.xml")
+  if not container then return nil, "Cannot read metadata" end
+  self.container = container
+  return true
+end
+
+
+function EpubReader:find_opf_file()
+  local container = self.container
+  local opf_path
+  -- find path of the OPF data in the DOM object of container.xml
+  for _, rootfile in ipairs(container:query_selector("rootfile")) do
+    local path, media_type = rootfile:get_attribute("full-path"), rootfile:get_attribute("media-type")
+    if media_type == "application/oebps-package+xml" then opf_path = path end
+  end
+  if not opf_path then return nil, "Cannot find the OPF file" end
+  return opf_path
+end
+
+function EpubReader:load_opf_file()
+  local opf_path  = self:find_opf_file()
+  if not opf_path then return nil, msg end
+  self.opf_path = opf_path
+  self.opf = self:read_xml_file(opf_path)
+  if not self.opf then return nil, "Cannot read the OPF file" end
+  return true
+end
+
 
 function EpubReader.load(self, filename)
   -- open Epub file, validate basic metadata and load the opf file
   self.filename = filename
   self.zip_file, msg = zip.open(filename)
   if not self.zip_file then return nil, msg end
-  local mimetype, msg = self:read_file("mimetype") 
-  if not mimetype then return nil, "Cannot detect mimetype" end
-  if mimetype ~= "application/epub+zip" then return nil, "Wrong mimetype: " .. mimetype end
-  local container = self:read_xml_file("META-INF/container.xml")
-  if not container then return nil, "Cannot read metadata" end
-  local opf_path  
-  for _, rootfile in ipairs(container:query_selector("rootfile")) do
-    local path, media_type = rootfile:get_attribute("full-path"), rootfile:get_attribute("media-type")
-    if media_type == "application/oebps-package+xml" then opf_path = path end
-  end
-  if not opf_path then return nil, "Cannot find the OPF file" end
-  self.opf_path = opf_path
-  self.opf = self:read_xml_file(opf_path)
-  if not self.opf then return nil, "Cannot read the OPF file" end
+  -- check correct mimetype
+  local status, msg = self:check_mimetype()
+  if not status then return nil, msg end
+  -- load container
+  local status, msg = self:load_container()
+  if not status then return nil, msg end
+  -- load OPF file
+  local status, msg = self:load_opf_file()
+  if not status then return nil, msg end
   return true
 end
 
